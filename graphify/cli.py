@@ -2091,7 +2091,7 @@ def dispatch_command(cmd: str) -> None:
 
     elif cmd == "explain":
         if len(sys.argv) < 3:
-            print('Usage: graphify explain "<node>" [--all] [--graph path]', file=sys.stderr)
+            print('Usage: graphify explain "<node>" [--all] [--no-code] [--graph path]', file=sys.stderr)
             sys.exit(1)
         from graphify.serve import _is_ambiguity_refusal, _resolve_single_node
         from networkx.readwrite import json_graph
@@ -2100,6 +2100,7 @@ def dispatch_command(cmd: str) -> None:
         graph_path = _default_graph_path()
         args = sys.argv[3:]
         show_all = "--all" in args
+        show_code = "--no-code" not in args
         for i, a in enumerate(args):
             if a == "--graph" and i + 1 < len(args):
                 graph_path = args[i + 1]
@@ -2154,6 +2155,32 @@ def dispatch_command(cmd: str) -> None:
         except Exception:
             pass
         print(f"  Degree:    {G.degree(nid)}")
+        # Plain-language layer (graphify/explain.py): what the node is and does,
+        # its own docstrings/comments, and the code itself. Best-effort — the
+        # connection listing below never depends on it.
+        try:
+            import textwrap as _tw
+            from graphify.explain import SnippetReader, explain_node
+            _ex = explain_node(
+                G, nid,
+                community_name=d.get("community_name"),
+                reader=SnippetReader(gp) if show_code else None,
+            )
+            print("\nWhat it is:")
+            print(_tw.fill(_ex["summary"], width=88, initial_indent="  ", subsequent_indent="  "))
+            if _ex["docs"]:
+                print("\nWhat the code says about itself:")
+                for _doc in _ex["docs"]:
+                    print(_tw.fill(_doc, width=88, initial_indent="  - ", subsequent_indent="    "))
+            _code = _ex.get("code")
+            if _code:
+                print(f"\nCode ({d.get('source_file', '')}:{_code['start']}):")
+                for _i, _line in enumerate(_code["lines"]):
+                    print(f"  {_code['start'] + _i:>5} | {_line}")
+                if _code["truncated"]:
+                    print("        | ...")
+        except Exception:
+            pass
         from graphify.build import edge_data
         connections: list[tuple[str, str, dict]] = []  # (direction, neighbor_id, edge_data)
         # Classify by the edge's TRUE direction, not the loaded arc order:

@@ -2,6 +2,10 @@
 
 Full release notes with details on each version: [GitHub Releases](https://github.com/Graphify-Labs/graphify/releases)
 
+## Unreleased
+
+- Feature: **explain** clicking a node in `graph.html` explains the code, not just its connections. You get a plain-English summary of what the node is and does (kind, location, what it calls and what calls it, entry point vs building block, how many files a change touches), its own docstrings, JSDoc and rationale comments, its neighbors grouped by meaning (*Calls*, *Called by*, *Imports*, *Methods*, *Inherits from*, ...), and the code itself with line numbers. With nothing selected, the panel shows a codebase overview: foundations (most depended-on code), likely entry points and main areas. `graphify explain` prints the same summary, docs and code (`--no-code` to skip the code). It is all deterministic and offline (new `graphify/explain.py`). Snippets are read only for code nodes, confined to the project root and capped at about 2 MB per page; `GRAPHIFY_HTML_CODE=0` keeps source out of `graph.html`.
+
 ## 0.9.95 (2026-10-23)
 
 Twenty-one community pull requests. A security pass on install: the skill-install writes go through randomly-named temp files instead of predictable ones, so a pre-planted symlink can no longer redirect a write. Extraction: Python, Go, C++ and Rust explicit type aliases (and Rust `union` items) are extracted as type nodes so references resolve instead of minting sourceless stubs, each C# method overload gets its own node bound by argument count, and a package.json dependency's manifest entry links to the node that references it. Plus a one-root-per-repo tree on merged graphs, extended-length cache paths on Windows, and binary media no longer counted as text. The AST cache schema is bumped, so the first build after upgrading re-extracts.

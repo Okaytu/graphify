@@ -64,7 +64,7 @@ That's it. You get **three files**:
 
 ```
 graphify-out/
-├── graph.html       open in any browser: click nodes, filter, search
+├── graph.html       open in any browser: click a node to see what it is, what it does and its code
 ├── GRAPH_REPORT.md  the highlights: key concepts, surprising connections, suggested questions
 └── graph.json       the full graph: query it anytime without re-reading your files
 ```
@@ -369,6 +369,19 @@ graphify prs --conflicts           # PRs sharing graph communities: merge-order 
 
 See the [full command reference](#full-command-reference) below.
 
+### Understanding the code, not just the connections
+
+Clicking a node in `graph.html` (or running `graphify explain`) tells you what the code *means*, not only what it links to. It's built from the graph and your source files, so there's no LLM call and no API cost:
+
+- **What it is**: a plain-English summary covering the kind of thing (function, method, class, UI component, file), where it lives, what it calls and what calls it, whether it looks like an entry point or a self-contained building block, and how many files would feel a change to it.
+- **What the code says about itself**: its docstring, JSDoc and `NOTE:`/`WHY:` comments.
+- **Relationships by meaning**: neighbors grouped as *Calls*, *Called by*, *Imports*, *Methods*, *Inherits from*, *Rendered by* and so on, instead of one flat list.
+- **The code**: the definition itself with line numbers, including the comment block above it.
+
+Before you click anything, the panel shows the codebase overview: its **foundations** (the code most other code depends on, so read these first), its **likely entry points**, and its **main areas**.
+
+`graph.html` embeds those source snippets (about 2 MB per page at most). Set `GRAPHIFY_HTML_CODE=0` before building to leave code out, for example when the file will be shared outside your team. `graphify explain "X" --no-code` does the same on the CLI.
+
 ---
 
 ## Labeling and rendering limits
@@ -377,6 +390,7 @@ See the [full command reference](#full-command-reference) below.
 - **`--missing-only`**: `label --missing-only` keeps existing labels and names only unnamed / `Community N` entries. Use `label` (full relabel) to refresh names after the community set changes.
 - **`.graphify_labels.json.sig`**: records the community membership signature; labels survive a re-cluster only while it matches.
 - **`export html`**: 5,000-node default; above it graphify renders an aggregated community view. Use `--node-limit N`. `GRAPHIFY_VIZ_NODE_LIMIT` / `.graphifyrc` `viz_node_limit=N` apply to `cluster-only`, `update`, `watch`, and hooks, not `export html`.
+- **Code in `graph.html`**: the node panel embeds source snippets for code nodes, highest-degree first, capped at about 2 MB per page. `GRAPHIFY_HTML_CODE=0` leaves code out; the summaries, docs and relationships stay.
 - **Leiden fallback**: without the `leiden` extra, clustering silently uses networkx Louvain. Switching later reshuffles every community, so plan a full relabel.
 
 ---
