@@ -2321,12 +2321,22 @@ def _build_server(graph_path: str):
             ),
             types.Tool(
                 name="get_node",
-                description="Get full details for a specific node by label or ID.",
+                description=(
+                    "Get full details for a specific node by label or ID, plus a plain-language "
+                    "explanation: what it is and does (callers, callees, impact of changing it), "
+                    "its own docstrings/comments, and its source code — usually enough to answer "
+                    "'what does X do?' without reading the file."
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "label": {"type": "string", "description": "Node label or ID to look up"},
                         "node_id": {"type": "string", "description": "Alias for label (node id)"},
+                        "include_code": {
+                            "type": "boolean", "default": True,
+                            "description": "Include the node's source snippet (up to 30 lines). "
+                                           "Set false to save tokens.",
+                        },
                     },
                 },
             ),
@@ -2515,7 +2525,23 @@ def _build_server(graph_path: str):
             f"  Community: {sanitize_label(str(d.get('community_name') or d.get('community', '')))}",
             f"  Degree: {G.degree(nid)}",
             *attrs_line,
+            *_explanation_lines(nid, include_code=arguments.get("include_code", True) is not False),
         ])
+
+    def _explanation_lines(nid: str, *, include_code: bool) -> list[str]:
+        """The same plain-language block `graphify explain` prints. Best-effort:
+        a failure here never costs the caller the node details above."""
+        try:
+            from graphify.explain import SnippetReader, explain_node, format_explanation
+            d = G.nodes[nid]
+            ex = explain_node(
+                G, nid,
+                community_name=d.get("community_name"),
+                reader=SnippetReader(active_graph_path) if include_code else None,
+            )
+            return format_explanation(ex, str(d.get("source_file") or ""))
+        except Exception:
+            return []
 
     def _tool_get_neighbors(arguments: dict) -> str:
         raw = _node_arg(arguments)

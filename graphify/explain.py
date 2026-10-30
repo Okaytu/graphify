@@ -85,14 +85,35 @@ def relation_index(G: nx.Graph) -> dict[str, list[tuple[str, str, str, dict]]]:
     """
     index: dict[str, list[tuple[str, str, str, dict]]] = defaultdict(list)
     for u, v, data in G.edges(data=True):
-        src = data.get("_src", u)
-        tgt = data.get("_tgt", v)
-        if src not in (u, v) or tgt not in (u, v):
-            src, tgt = u, v
-        rel = str(data.get("relation") or "")
+        src, tgt, rel = _true_endpoints(u, v, data)
         index[src].append(("out", rel, tgt, data))
         index[tgt].append(("in", rel, src, data))
     return index
+
+
+def node_relations(G: nx.Graph, nid: str) -> list[tuple[str, str, str, dict]]:
+    """``relation_index(G)[nid]`` without scanning the whole graph — for a
+    single lookup (``graphify explain``, MCP ``get_node``) on a large graph."""
+    if G.is_directed():
+        edges = list(G.out_edges(nid, data=True)) + list(G.in_edges(nid, data=True))
+    else:
+        edges = list(G.edges(nid, data=True))
+    rels = []
+    for u, v, data in edges:
+        src, tgt, rel = _true_endpoints(u, v, data)
+        if src == nid:
+            rels.append(("out", rel, tgt, data))
+        if tgt == nid:
+            rels.append(("in", rel, src, data))
+    return rels
+
+
+def _true_endpoints(u, v, data: dict) -> tuple[str, str, str]:
+    src = data.get("_src", u)
+    tgt = data.get("_tgt", v)
+    if src not in (u, v) or tgt not in (u, v):
+        src, tgt = u, v
+    return src, tgt, str(data.get("relation") or "")
 
 
 def _label(G: nx.Graph, nid: str) -> str:
@@ -380,7 +401,7 @@ def explain_node(
     reader: SnippetReader | None = None,
 ) -> dict:
     """Everything the UI/CLI shows about one node, as plain data."""
-    rels = (index if index is not None else relation_index(G)).get(nid, [])
+    rels = index.get(nid, []) if index is not None else node_relations(G, nid)
     kind = node_kind(G, nid, rels)
     d = G.nodes[nid]
     line = _line_of(d.get("source_location"))
@@ -398,6 +419,30 @@ def explain_node(
             if lead and not any(lead in doc or doc in lead for doc in out["docs"]):
                 out["docs"].insert(0, lead)
     return out
+
+
+_CODE_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def format_explanation(ex: dict, source_file: str = "", width: int = 88) -> list[str]:
+    """Text rendering of ``explain_node()`` shared by ``graphify explain`` and
+    MCP ``get_node``, so the CLI and the agent see the same explanation."""
+    import textwrap
+    lines = ["", "What it is:"]
+    lines += textwrap.wrap(ex["summary"], width, initial_indent="  ", subsequent_indent="  ")
+    if ex.get("docs"):
+        lines += ["", "What the code says about itself:"]
+        for doc in ex["docs"]:
+            lines += textwrap.wrap(doc, width, initial_indent="  - ", subsequent_indent="    ")
+    code = ex.get("code")
+    if code:
+        lines += ["", f"Code ({sanitize_label(source_file)}:{code['start']}):"]
+        # Source text is shown verbatim except for terminal control characters.
+        lines += [f"  {code['start'] + i:>5} | {_CODE_CONTROL_RE.sub('', line)}"
+                  for i, line in enumerate(code["lines"])]
+        if code["truncated"]:
+            lines.append("        | ...")
+    return lines
 
 
 def leading_comment(code: dict, line: int | None) -> str:

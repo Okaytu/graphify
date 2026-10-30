@@ -234,3 +234,54 @@ def test_snippet_reader_only_reads_code_nodes(tmp_path):
     reader = SnippetReader(root / "graphify-out" / "graph.json")
     assert reader.snippet(G, "doc", "document") is None
     assert reader.snippet(G, "load", "function") is not None
+
+
+def test_node_relations_matches_full_index():
+    from graphify.explain import node_relations
+
+    G = _web_graph()
+    idx = relation_index(G)
+    for nid in G.nodes:
+        assert sorted(node_relations(G, nid), key=repr) == sorted(idx.get(nid, []), key=repr)
+    D = nx.DiGraph()
+    D.add_edge("a", "b", relation="calls")
+    assert [r[:3] for r in node_relations(D, "b")] == [("in", "calls", "a")]
+    assert [r[:3] for r in node_relations(D, "a")] == [("out", "calls", "b")]
+
+
+def _mcp_graph(tmp_path):
+    """graph.json in <root>/graphify-out next to the source it describes."""
+    root, _ = _project(tmp_path)
+    graph = {
+        "directed": True,
+        "nodes": [
+            {"id": "load", "label": "loadProfile()", "file_type": "code", "community": 0,
+             "source_file": "src/api.ts", "source_location": "L4"},
+            {"id": "val", "label": "validateUser()", "file_type": "code", "community": 0,
+             "source_file": "src/auth.ts", "source_location": "L1"},
+        ],
+        "edges": [{"source": "load", "target": "val", "relation": "calls", "confidence": "EXTRACTED"}],
+    }
+    gp = root / "graphify-out" / "graph.json"
+    gp.write_text(json.dumps(graph), encoding="utf-8")
+    return str(gp)
+
+
+def test_mcp_get_node_includes_explanation(tmp_path):
+    import pytest
+    pytest.importorskip("mcp")
+    pytest.importorskip("starlette")
+    from graphify import serve as serve_mod
+    from tests.test_serve_http import _call_tool, _client, _init_session
+
+    app = serve_mod._build_http_app(_mcp_graph(tmp_path), json_response=True)
+    with _client(app) as client:
+        headers = _init_session(client)
+        full = _call_tool(client, headers, "get_node", {"label": "loadProfile()"}, rid=2)
+        lean = _call_tool(client, headers, "get_node",
+                          {"label": "loadProfile()", "include_code": False}, rid=3)
+    assert full.startswith("Node: loadProfile()")
+    assert "What it is:" in full and "It calls validateUser()." in full
+    assert "What the code says about itself:" in full and "Loads the profile." in full
+    assert "Code (src/api.ts:3):" in full and "export async function loadProfile" in full
+    assert "What it is:" in lean and "Code (" not in lean

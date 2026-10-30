@@ -371,7 +371,7 @@ See the [full command reference](#full-command-reference) below.
 
 ### Understanding the code, not just the connections
 
-Clicking a node in `graph.html` (or running `graphify explain`) tells you what the code *means*, not only what it links to. It's built from the graph and your source files, so there's no LLM call and no API cost:
+Clicking a node in `graph.html` (or running `graphify explain`, or your assistant calling the MCP `get_node` tool) tells you what the code *means*, not only what it links to. It's built from the graph and your source files, so there's no LLM call and no API cost:
 
 - **What it is**: a plain-English summary covering the kind of thing (function, method, class, UI component, file), where it lives, what it calls and what calls it, whether it looks like an entry point or a self-contained building block, and how many files would feel a change to it.
 - **What the code says about itself**: its docstring, JSDoc and `NOTE:`/`WHY:` comments.
@@ -380,7 +380,7 @@ Clicking a node in `graph.html` (or running `graphify explain`) tells you what t
 
 Before you click anything, the panel shows the codebase overview: its **foundations** (the code most other code depends on, so read these first), its **likely entry points**, and its **main areas**.
 
-`graph.html` embeds those source snippets (about 2 MB per page at most). Set `GRAPHIFY_HTML_CODE=0` before building to leave code out, for example when the file will be shared outside your team. `graphify explain "X" --no-code` does the same on the CLI.
+`graph.html` embeds those source snippets (about 2 MB per page at most). Set `GRAPHIFY_HTML_CODE=0` before building to leave code out, for example when the file will be shared outside your team. `graphify explain "X" --no-code` does the same on the CLI, and MCP `get_node` takes `include_code: false`.
 
 ---
 
