@@ -1683,6 +1683,88 @@ def dispatch_command(cmd: str) -> None:
             sys.exit(EXIT_AMBIGUOUS)
         if _result == _QUERY_NO_MATCH or _result.startswith("No unique node match for --seed:"):
             sys.exit(EXIT_NOT_FOUND)
+    elif cmd == "tour":
+        # Guided tour (graphify/tour.py): a reading order from where execution
+        # starts, each step saying why it comes next, with its explanation.
+        from graphify.explain import SnippetReader
+        from graphify.paths import load_node_link_graph
+        from graphify.serve import _is_ambiguity_refusal, _resolve_single_node
+        from graphify.tour import DEFAULT_STEPS, build_tour, format_tour, suggest_tours
+        graph_path = _default_graph_path()
+        args = sys.argv[2:]
+        start_label: str | None = None
+        steps = DEFAULT_STEPS
+        i = 0
+        while i < len(args):
+            a = args[i]
+            if a == "--graph" and i + 1 < len(args):
+                graph_path = args[i + 1]
+                i += 2
+                continue
+            if a == "--steps" and i + 1 < len(args):
+                try:
+                    steps = max(1, int(args[i + 1]))
+                except ValueError:
+                    print("error: --steps must be an integer", file=sys.stderr)
+                    sys.exit(1)
+                i += 2
+                continue
+            if not a.startswith("--") and start_label is None:
+                start_label = a
+            i += 1
+        gp = Path(graph_path).resolve()
+        if not gp.exists():
+            print(f"error: graph file not found: {gp}", file=sys.stderr)
+            sys.exit(1)
+        _enforce_graph_size_cap_or_exit(gp)
+        G = load_node_link_graph(json.loads(gp.read_text(encoding="utf-8")))
+        if start_label:
+            nid, refusal = _resolve_single_node(G, start_label)
+            if nid is None:
+                print(refusal)
+                sys.exit(EXIT_AMBIGUOUS if _is_ambiguity_refusal(refusal) else EXIT_NOT_FOUND)
+            tours = [build_tour(G, nid, max_steps=steps)]
+        else:
+            tours = suggest_tours(G, max_steps=steps)
+        if not tours:
+            print("No code to tour in this graph.")
+            sys.exit(EXIT_NOT_FOUND)
+        if "--list" in args:
+            for n, t in enumerate(tours, 1):
+                print(f"{n}. {t['title']} ({len(t['steps'])} steps)")
+            sys.exit(0)
+        reader = None if "--no-code" in args else SnippetReader(gp)
+        print("\n".join(format_tour(G, tours[0], reader=reader)))
+        if len(tours) > 1:
+            print("\nOther tours:")
+            for t in tours[1:]:
+                start = G.nodes[t["start"]]
+                print(f'  graphify tour "{start.get("source_file", "")}::{start.get("label", t["start"])}"'
+                      f"   # {t['title']}")
+
+    elif cmd == "routes":
+        # Web route map (graphify/routes.py): API routes and pages, the code that
+        # serves each one, and the frontend code that calls or links to it.
+        from graphify.paths import load_node_link_graph
+        from graphify.routes import format_routes, route_table
+        graph_path = _default_graph_path()
+        args = sys.argv[2:]
+        for i, a in enumerate(args):
+            if a == "--graph" and i + 1 < len(args):
+                graph_path = args[i + 1]
+            elif a.startswith("--graph="):
+                graph_path = a.split("=", 1)[1]
+        gp = Path(graph_path).resolve()
+        if not gp.exists():
+            print(f"error: graph file not found: {gp}", file=sys.stderr)
+            sys.exit(1)
+        _enforce_graph_size_cap_or_exit(gp)
+        G = load_node_link_graph(json.loads(gp.read_text(encoding="utf-8")))
+        if "--json" in args:
+            print(json.dumps(route_table(G), indent=2))
+        else:
+            print("\n".join(format_routes(G)).rstrip())
+
     elif cmd == "affected":
         if len(sys.argv) < 3:
             print("Usage: graphify affected \"<node-or-label>\" [--relation R] [--depth N] [--graph path]", file=sys.stderr)
@@ -2091,7 +2173,7 @@ def dispatch_command(cmd: str) -> None:
 
     elif cmd == "explain":
         if len(sys.argv) < 3:
-            print('Usage: graphify explain "<node>" [--all] [--graph path]', file=sys.stderr)
+            print('Usage: graphify explain "<node>" [--all] [--no-code] [--graph path]', file=sys.stderr)
             sys.exit(1)
         from graphify.serve import _is_ambiguity_refusal, _resolve_single_node
         from networkx.readwrite import json_graph
@@ -2100,6 +2182,7 @@ def dispatch_command(cmd: str) -> None:
         graph_path = _default_graph_path()
         args = sys.argv[3:]
         show_all = "--all" in args
+        show_code = "--no-code" not in args
         for i, a in enumerate(args):
             if a == "--graph" and i + 1 < len(args):
                 graph_path = args[i + 1]
@@ -2154,6 +2237,19 @@ def dispatch_command(cmd: str) -> None:
         except Exception:
             pass
         print(f"  Degree:    {G.degree(nid)}")
+        # Plain-language layer (graphify/explain.py): what the node is and does,
+        # its own docstrings/comments, and the code itself. Best-effort — the
+        # connection listing below never depends on it.
+        try:
+            from graphify.explain import SnippetReader, explain_node, format_explanation
+            _ex = explain_node(
+                G, nid,
+                community_name=d.get("community_name"),
+                reader=SnippetReader(gp) if show_code else None,
+            )
+            print("\n".join(format_explanation(_ex, str(d.get("source_file") or ""))))
+        except Exception:
+            pass
         from graphify.build import edge_data
         connections: list[tuple[str, str, dict]] = []  # (direction, neighbor_id, edge_data)
         # Classify by the edge's TRUE direction, not the loaded arc order:

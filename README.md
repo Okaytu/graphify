@@ -64,7 +64,7 @@ That's it. You get **three files**:
 
 ```
 graphify-out/
-├── graph.html       open in any browser: click nodes, filter, search
+├── graph.html       open in any browser: click a node to see what it is, what it does and its code
 ├── GRAPH_REPORT.md  the highlights: key concepts, surprising connections, suggested questions
 └── graph.json       the full graph: query it anytime without re-reading your files
 ```
@@ -369,6 +369,66 @@ graphify prs --conflicts           # PRs sharing graph communities: merge-order 
 
 See the [full command reference](#full-command-reference) below.
 
+### Understanding the code, not just the connections
+
+Clicking a node in `graph.html` (or running `graphify explain`, or your assistant calling the MCP `get_node` tool) tells you what the code *means*, not only what it links to. It's built from the graph and your source files, so there's no LLM call and no API cost:
+
+- **What it is**: a plain-English summary covering the kind of thing (function, method, class, UI component, file), where it lives, what it calls and what calls it, whether it looks like an entry point or a self-contained building block, and how many files would feel a change to it.
+- **What the code says about itself**: its docstring, JSDoc and `NOTE:`/`WHY:` comments.
+- **Relationships by meaning**: neighbors grouped as *Calls*, *Called by*, *Imports*, *Methods*, *Inherits from*, *Rendered by* and so on, instead of one flat list.
+- **The code**: the definition itself with line numbers, including the comment block above it.
+
+Before you click anything, the panel shows the codebase overview: its **foundations** (the code most other code depends on, so read these first), its **likely entry points**, and its **main areas**.
+
+### Web route map
+
+For web apps, graphify also maps what the app exposes and who calls it. It finds:
+
+- **API routes**: Express, Koa, Fastify and Hono (`app.get('/x', handler)`, including routers mounted with `app.use('/api', router)` in another file), Next.js (`app/**/route.ts`, `pages/api`), and FastAPI/Flask decorators (with `APIRouter(prefix=…)` / `Blueprint(url_prefix=…)`).
+- **Pages**: Next.js `page.tsx` and `pages/`, react-router `<Route path>`, route objects (`{ path, component }`, as used by vue-router), and TanStack Router `createFileRoute`.
+- **Calls into them**: `fetch`, `axios`, client instances (`api.get('/users')`), `useSWR`, `$fetch`, generated OpenAPI clients (`client.post({ url: '/api/v1/…' })`), plus links and navigation (`href`, `to`, `router.push`, `navigate`).
+
+Each route becomes a node like `GET /api/users/:id`, linked to the function that **handles** it and to the frontend code that **requests** it (or **navigates** to a page). You get the whole chain, *component → API call → route → handler → database*, as clickable steps in `graph.html`, and the panel's overview starts with a **Routes & pages** list.
+
+```text
+$ graphify routes
+API routes (2):
+  GET    /api/users/:id  server/routes/users.ts:14  -> getUser()
+                         called from: loadUser() (web/src/api.ts)
+  POST   /api/users      server/routes/users.ts:15  -> createUser()
+                         called from: addUser() (web/src/api.ts)
+```
+
+`graphify routes --json` gives the same map as data, and the MCP `list_routes` tool gives it to your assistant. Matching a call to a route (`/users/${id}` to `/users/:id`) is a deduction, so those links are `INFERRED`. A base URL held in a variable (`${API_URL}/users`), or a router mounted with a prefix graphify can't see, is matched by the end of the path.
+
+### Guided tours
+
+Not sure where to start reading? A guided tour gives you a reading order. It begins where execution begins (a page, an API route, or a function nothing else calls) and follows the flow outward, one request at a time: component → API call → route → handler → data layer. It ends with a couple of foundations: the code the most other code depends on. Every step says why it comes next, and each one carries the explanation and code described above.
+
+- **In `graph.html`**: pick a tour under **Guided tours** in the side panel, then use Back/Next or the ← → keys. The graph zooms to each step and highlights the edge that led there.
+- **On the CLI**: `graphify tour` walks the first suggested tour and lists the others. `graphify tour "loadUser"` starts from a node you choose; `--steps N`, `--list` and `--no-code` adjust it.
+- **For your assistant**: the MCP `get_tour` tool, for prompts like "walk me through how this app works".
+
+```text
+$ graphify tour "UserActionsMenu" --no-code    # step headers and reasons; each step also explains itself
+Tour: Follow UserActionsMenu() (UserActionsMenu.tsx) (10 steps)
+Step 1/10: UserActionsMenu()  [UI component · frontend/src/components/Admin/UserActionsMenu.tsx:19]
+  Why: Start here: nothing in the scanned code calls UserActionsMenu() directly, so this is where the flow begins. It leads to 54 other pieces of code.
+Step 2/10: EditUser()  [UI component · frontend/src/components/Admin/EditUser.tsx:59]
+  Why: UserActionsMenu() calls EditUser().
+Step 3/10: .updateUser()  [method · frontend/src/client/sdk.gen.ts:246]
+  Why: EditUser() calls .updateUser().
+Step 4/10: PATCH /users/{user_id}  [API route · backend/app/api/routes/users.py:183]
+  Why: .updateUser() sends a request to PATCH /users/{user_id}.
+Step 5/10: update_user()  [function · backend/app/api/routes/users.py:187]
+  Why: PATCH /users/{user_id} is served by update_user().
+...
+```
+
+Tests, generated code and third-party packages are skipped: they are not where you learn how an app works.
+
+`graph.html` embeds those source snippets (about 2 MB per page at most). Set `GRAPHIFY_HTML_CODE=0` before building to leave code out, for example when the file will be shared outside your team. `graphify explain "X" --no-code` does the same on the CLI, and MCP `get_node` takes `include_code: false`.
+
 ---
 
 ## Labeling and rendering limits
@@ -377,6 +437,7 @@ See the [full command reference](#full-command-reference) below.
 - **`--missing-only`**: `label --missing-only` keeps existing labels and names only unnamed / `Community N` entries. Use `label` (full relabel) to refresh names after the community set changes.
 - **`.graphify_labels.json.sig`**: records the community membership signature; labels survive a re-cluster only while it matches.
 - **`export html`**: 5,000-node default; above it graphify renders an aggregated community view. Use `--node-limit N`. `GRAPHIFY_VIZ_NODE_LIMIT` / `.graphifyrc` `viz_node_limit=N` apply to `cluster-only`, `update`, `watch`, and hooks, not `export html`.
+- **Code in `graph.html`**: the node panel embeds source snippets for code nodes, highest-degree first, capped at about 2 MB per page. `GRAPHIFY_HTML_CODE=0` leaves code out; the summaries, docs and relationships stay.
 - **Leiden fallback**: without the `leiden` extra, clustering silently uses networkx Louvain. Switching later reshuffles every community, so plan a full relabel.
 
 ---

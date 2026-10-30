@@ -11125,6 +11125,17 @@ def extract(
         e.pop("local_alias", None)
         e.pop("_python_plain_import", None)
 
+    # Web route map (graphify/routes.py): route/page nodes plus handled_by,
+    # requests and navigates edges. Runs after source_file relativization so it
+    # emits the same root-relative paths, and before provenance tagging so its
+    # output is AST-tier like everything else here. Never fails the extraction.
+    try:
+        from graphify.routes import link_routes
+        link_routes(paths, root, all_nodes, all_edges, resolution_context_nodes)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Route map extraction failed, skipping: %s", exc)
+
     # Tag AST provenance so the incremental watch rebuild can distinguish
     # AST-extracted nodes from semantic/LLM nodes. On a full re-extraction
     # the watcher drops any AST-marked node missing from the fresh output

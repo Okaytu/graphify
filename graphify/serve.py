@@ -2321,12 +2321,59 @@ def _build_server(graph_path: str):
             ),
             types.Tool(
                 name="get_node",
-                description="Get full details for a specific node by label or ID.",
+                description=(
+                    "Get full details for a specific node by label or ID, plus a plain-language "
+                    "explanation: what it is and does (callers, callees, impact of changing it), "
+                    "its own docstrings/comments, and its source code — usually enough to answer "
+                    "'what does X do?' without reading the file."
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "label": {"type": "string", "description": "Node label or ID to look up"},
                         "node_id": {"type": "string", "description": "Alias for label (node id)"},
+                        "include_code": {
+                            "type": "boolean", "default": True,
+                            "description": "Include the node's source snippet (up to 30 lines). "
+                                           "Set false to save tokens.",
+                        },
+                    },
+                },
+            ),
+            types.Tool(
+                name="list_routes",
+                description=(
+                    "Web route map: every API route (Express/Koa/Fastify/Hono, Next.js, "
+                    "FastAPI/Flask) and page (Next.js, react-router, vue-router) with the "
+                    "function that handles it and the frontend code that calls or links to it. "
+                    "Use it to answer 'what happens when the UI hits /api/x?' or 'which "
+                    "endpoints does this app expose?'."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "token_budget": {"type": "integer", "default": 2000, "description": "Max output tokens"},
+                    },
+                },
+            ),
+            types.Tool(
+                name="get_tour",
+                description=(
+                    "Guided tour of the codebase: a reading order that starts where execution "
+                    "starts (a page, an API route, or an uncalled function) and follows calls, "
+                    "requests and route handlers outward, each step saying why it comes next, "
+                    "with a plain-language explanation. Use it to answer 'walk me through how "
+                    "this app works' or 'explain the flow from X'. Without `start`, returns the "
+                    "first suggested tour and lists the others."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "start": {"type": "string", "description": "Optional node label or id to start from"},
+                        "steps": {"type": "integer", "default": 10, "description": "Max steps (1-25)"},
+                        "include_code": {"type": "boolean", "default": False,
+                                         "description": "Include a short code excerpt per step"},
+                        "token_budget": {"type": "integer", "default": 3000, "description": "Max output tokens"},
                     },
                 },
             ),
@@ -2515,7 +2562,52 @@ def _build_server(graph_path: str):
             f"  Community: {sanitize_label(str(d.get('community_name') or d.get('community', '')))}",
             f"  Degree: {G.degree(nid)}",
             *attrs_line,
+            *_explanation_lines(nid, include_code=arguments.get("include_code", True) is not False),
         ])
+
+    def _explanation_lines(nid: str, *, include_code: bool) -> list[str]:
+        """The same plain-language block `graphify explain` prints. Best-effort:
+        a failure here never costs the caller the node details above."""
+        try:
+            from graphify.explain import SnippetReader, explain_node, format_explanation
+            d = G.nodes[nid]
+            ex = explain_node(
+                G, nid,
+                community_name=d.get("community_name"),
+                reader=SnippetReader(active_graph_path) if include_code else None,
+            )
+            return format_explanation(ex, str(d.get("source_file") or ""))
+        except Exception:
+            return []
+
+    def _tool_list_routes(arguments: dict) -> str:
+        from graphify.routes import format_routes
+        budget = int(arguments.get("token_budget", 2000))
+        return _cut_lines_to_budget(
+            format_routes(G), budget, "Raise token_budget or use get_node on a specific route"
+        )
+
+    def _tool_get_tour(arguments: dict) -> str:
+        from graphify.explain import SnippetReader
+        from graphify.tour import build_tour, format_tour, suggest_tours
+        steps = max(1, min(25, int(arguments.get("steps", 10))))
+        start = str(arguments.get("start") or "").strip()
+        if start:
+            nid, err = _resolve_single_node(G, start.lower())
+            if err:
+                return err
+            tours = [build_tour(G, nid, max_steps=steps)]
+        else:
+            tours = suggest_tours(G, max_steps=steps)
+        if not tours:
+            return "No code to tour in this graph."
+        reader = SnippetReader(active_graph_path) if arguments.get("include_code") is True else None
+        lines = format_tour(G, tours[0], reader=reader)
+        if len(tours) > 1:
+            lines += ["", "Other suggested tours (call get_tour with start=...):"]
+            lines += [f"  {t['title']}: start={G.nodes[t['start']].get('label', t['start'])!r}" for t in tours[1:]]
+        budget = int(arguments.get("token_budget", 3000))
+        return _cut_lines_to_budget(lines, budget, "Lower steps, or start the tour from a specific node")
 
     def _tool_get_neighbors(arguments: dict) -> str:
         raw = _node_arg(arguments)
@@ -2689,6 +2781,8 @@ def _build_server(graph_path: str):
     _handlers = {
         "query_graph": _tool_query_graph,
         "get_node": _tool_get_node,
+        "list_routes": _tool_list_routes,
+        "get_tour": _tool_get_tour,
         "get_neighbors": _tool_get_neighbors,
         "get_community": _tool_get_community,
         "god_nodes": _tool_god_nodes,
