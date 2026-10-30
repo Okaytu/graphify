@@ -24,6 +24,7 @@ Signatures below are the real ones - `tests/test_architecture_doc.py` imports ev
 | `report.py` | `generate(G, communities, cohesion_scores, community_labels, ...)` | graph + analysis → GRAPH_REPORT.md string |
 | `export.py` | `to_json`, `to_html`, `to_obsidian`, `to_svg`, `to_graphml`, `to_canvas`, `to_cypher` | graph → graph.json, graph.html, Obsidian vault, graph.svg, … one function per format |
 | `explain.py` | `explain_node(G, node_id, *, index, community_name, reader)`, `codebase_overview(G, communities, community_labels)` | graph (+ source files) → plain-language summary, docs, grouped relations and code snippet per node; the overview behind graph.html's side panel and `graphify explain` |
+| `routes.py` | `link_routes(paths, root, nodes, edges, context_nodes)`, `route_table(G)`, `format_routes(G)` | `extract()` post-pass: source text → route/page nodes plus `handled_by` / `requests` / `navigates` edges; graph → the route map behind `graphify routes`, MCP `list_routes` and graph.html's overview |
 | `wiki.py` | `to_wiki(G, communities, output_dir, ...)` | graph → one markdown article per community + `index.md` |
 | `callflow_html.py` | `write_callflow_html(...)` | graphify-out files → Mermaid architecture/call-flow HTML |
 | `ingest.py` | `ingest(url, target_dir, ...)` | URL → file saved to corpus dir |

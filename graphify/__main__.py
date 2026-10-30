@@ -874,6 +874,7 @@ def _run_cli() -> None:
         print("                            the JSON 'directed' flag is NOT consulted)")
         print("    --undirected            ignore edge direction")
         print("  explain \"X\"             plain-language explanation of a node and its neighbors")
+        print("  routes                  web route map: API routes and pages, their handlers and callers")
         print("    --all                   list every connection (default: the 20 most connected)")
         print("    --graph <path>          path to graph.json (default graphify-out/graph.json)")
         print("  diagnose multigraph    report same-endpoint edge collapse risk in graph.json")

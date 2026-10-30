@@ -373,6 +373,10 @@ function showOverview() {{
       return `<div class="section-title">${{esc(title)}}</div><div class="field" style="font-size:11px;color:var(--muted)">${{esc(hint)}}</div>`
         + items.map(fmt).join('');
     }};
+    const moreRoutes = (OVERVIEW.route_count || 0) - (OVERVIEW.routes || []).length;
+    html += list('Routes & pages', 'What the app exposes: each API route and page, and how many places call or link to it.'
+      + (moreRoutes > 0 ? ` Showing the first ${{(OVERVIEW.routes || []).length}} of ${{OVERVIEW.route_count}}; search for the rest.` : ''),
+      OVERVIEW.routes, r => nodeLink(r.id, r.callers ? `${{r.callers}} caller${{r.callers === 1 ? '' : 's'}}` : 'no callers in scan'));
     html += list('Foundations', 'The code most other code depends on \u2014 understand these first.',
       OVERVIEW.foundations, f => nodeLink(f.id, `${{f.dependents}} dependent${{f.dependents === 1 ? '' : 's'}}`));
     html += list('Likely entry points', 'Functions nothing else calls: where execution probably starts.',

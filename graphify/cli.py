@@ -1683,6 +1683,29 @@ def dispatch_command(cmd: str) -> None:
             sys.exit(EXIT_AMBIGUOUS)
         if _result == _QUERY_NO_MATCH or _result.startswith("No unique node match for --seed:"):
             sys.exit(EXIT_NOT_FOUND)
+    elif cmd == "routes":
+        # Web route map (graphify/routes.py): API routes and pages, the code that
+        # serves each one, and the frontend code that calls or links to it.
+        from graphify.paths import load_node_link_graph
+        from graphify.routes import format_routes, route_table
+        graph_path = _default_graph_path()
+        args = sys.argv[2:]
+        for i, a in enumerate(args):
+            if a == "--graph" and i + 1 < len(args):
+                graph_path = args[i + 1]
+            elif a.startswith("--graph="):
+                graph_path = a.split("=", 1)[1]
+        gp = Path(graph_path).resolve()
+        if not gp.exists():
+            print(f"error: graph file not found: {gp}", file=sys.stderr)
+            sys.exit(1)
+        _enforce_graph_size_cap_or_exit(gp)
+        G = load_node_link_graph(json.loads(gp.read_text(encoding="utf-8")))
+        if "--json" in args:
+            print(json.dumps(route_table(G), indent=2))
+        else:
+            print("\n".join(format_routes(G)).rstrip())
+
     elif cmd == "affected":
         if len(sys.argv) < 3:
             print("Usage: graphify affected \"<node-or-label>\" [--relation R] [--depth N] [--graph path]", file=sys.stderr)

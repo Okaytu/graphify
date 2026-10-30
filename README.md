@@ -380,6 +380,27 @@ Clicking a node in `graph.html` (or running `graphify explain`, or your assistan
 
 Before you click anything, the panel shows the codebase overview: its **foundations** (the code most other code depends on, so read these first), its **likely entry points**, and its **main areas**.
 
+### Web route map
+
+For web apps, graphify also maps what the app exposes and who calls it. It finds:
+
+- **API routes**: Express, Koa, Fastify and Hono (`app.get('/x', handler)`, including routers mounted with `app.use('/api', router)` in another file), Next.js (`app/**/route.ts`, `pages/api`), and FastAPI/Flask decorators (with `APIRouter(prefix=…)` / `Blueprint(url_prefix=…)`).
+- **Pages**: Next.js `page.tsx` and `pages/`, react-router `<Route path>`, route objects (`{ path, component }`, as used by vue-router), and TanStack Router `createFileRoute`.
+- **Calls into them**: `fetch`, `axios`, client instances (`api.get('/users')`), `useSWR`, `$fetch`, generated OpenAPI clients (`client.post({ url: '/api/v1/…' })`), plus links and navigation (`href`, `to`, `router.push`, `navigate`).
+
+Each route becomes a node like `GET /api/users/:id`, linked to the function that **handles** it and to the frontend code that **requests** it (or **navigates** to a page). You get the whole chain, *component → API call → route → handler → database*, as clickable steps in `graph.html`, and the panel's overview starts with a **Routes & pages** list.
+
+```text
+$ graphify routes
+API routes (2):
+  GET    /api/users/:id  server/routes/users.ts:14  -> getUser()
+                         called from: loadUser() (web/src/api.ts)
+  POST   /api/users      server/routes/users.ts:15  -> createUser()
+                         called from: addUser() (web/src/api.ts)
+```
+
+`graphify routes --json` gives the same map as data, and the MCP `list_routes` tool gives it to your assistant. Matching a call to a route (`/users/${id}` to `/users/:id`) is a deduction, so those links are `INFERRED`. A base URL held in a variable (`${API_URL}/users`), or a router mounted with a prefix graphify can't see, is matched by the end of the path.
+
 `graph.html` embeds those source snippets (about 2 MB per page at most). Set `GRAPHIFY_HTML_CODE=0` before building to leave code out, for example when the file will be shared outside your team. `graphify explain "X" --no-code` does the same on the CLI, and MCP `get_node` takes `include_code: false`.
 
 ---

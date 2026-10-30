@@ -2341,6 +2341,22 @@ def _build_server(graph_path: str):
                 },
             ),
             types.Tool(
+                name="list_routes",
+                description=(
+                    "Web route map: every API route (Express/Koa/Fastify/Hono, Next.js, "
+                    "FastAPI/Flask) and page (Next.js, react-router, vue-router) with the "
+                    "function that handles it and the frontend code that calls or links to it. "
+                    "Use it to answer 'what happens when the UI hits /api/x?' or 'which "
+                    "endpoints does this app expose?'."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "token_budget": {"type": "integer", "default": 2000, "description": "Max output tokens"},
+                    },
+                },
+            ),
+            types.Tool(
                 name="get_neighbors",
                 description="Get all direct neighbors of a node with edge details.",
                 inputSchema={
@@ -2543,6 +2559,13 @@ def _build_server(graph_path: str):
         except Exception:
             return []
 
+    def _tool_list_routes(arguments: dict) -> str:
+        from graphify.routes import format_routes
+        budget = int(arguments.get("token_budget", 2000))
+        return _cut_lines_to_budget(
+            format_routes(G), budget, "Raise token_budget or use get_node on a specific route"
+        )
+
     def _tool_get_neighbors(arguments: dict) -> str:
         raw = _node_arg(arguments)
         if not raw:
@@ -2715,6 +2738,7 @@ def _build_server(graph_path: str):
     _handlers = {
         "query_graph": _tool_query_graph,
         "get_node": _tool_get_node,
+        "list_routes": _tool_list_routes,
         "get_neighbors": _tool_get_neighbors,
         "get_community": _tool_get_community,
         "god_nodes": _tool_god_nodes,

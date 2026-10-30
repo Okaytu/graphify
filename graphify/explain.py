@@ -42,6 +42,8 @@ RELATION_PHRASES: dict[str, tuple[str, str]] = {
     "references": ("References", "Referenced by"),
     "references_constant": ("References", "Referenced by"),
     "navigates": ("Navigates to", "Navigated to from"),
+    "handled_by": ("Handled by", "Handles"),
+    "requests": ("Requests", "Requested by"),
     "tests": ("Tests", "Tested by"),
     "cites": ("Cites", "Cited by"),
 }
@@ -51,8 +53,10 @@ _DEPENDENT_RELATIONS = frozenset({
     "calls", "indirect_call", "imports", "imports_from", "re_exports", "uses",
     "uses_component", "references", "references_constant", "inherits", "extends",
     "implements", "instantiates", "includes", "depends_on", "crate_depends_on",
+    "requests", "navigates", "handled_by",
 })
 
+_OVERVIEW_ROUTES = 25
 _UI_SUFFIXES = (".tsx", ".jsx", ".vue", ".svelte", ".astro")
 _DOC_ATTRS = ("docstring", "description", "summary", "rationale")
 _MAX_DOCS = 5
@@ -128,6 +132,8 @@ def _line_of(location) -> int | None:
 def node_kind(G: nx.Graph, nid: str, rels: list[tuple[str, str, str, dict]] | None = None) -> str:
     """Best-effort human kind: function, method, class, UI component, file, ..."""
     d = G.nodes[nid]
+    if d.get("route_path"):
+        return "page" if d.get("route_method") == "PAGE" else "API route"
     ft = str(d.get("file_type") or "")
     if ft == "rationale":
         return "comment"
@@ -190,7 +196,12 @@ def _group(G: nx.Graph, rels) -> dict[str, list[str]]:
 
 
 def _names(G: nx.Graph, ids: list[str], limit: int = 3) -> str:
-    shown = ", ".join(_label(G, i) for i in ids[:limit])
+    labels = [_label(G, i) for i in ids[:limit]]
+    # Same label twice (one route in two apps): say which file each is in.
+    shown = ", ".join(
+        f"{lbl} ({sanitize_label(str(G.nodes[i].get('source_file') or i))})" if labels.count(lbl) > 1 else lbl
+        for lbl, i in zip(labels, ids[:limit])
+    )
     # "(+N others)", not "and N more": `explain` reserves "more" for its own
     # truncated-listing footer, which scripts and tests look for.
     return shown + (f" (+{len(ids) - limit} others)" if len(ids) > limit else "")
@@ -220,9 +231,13 @@ def summarize_node(
     first = f"{label} is {article} {kind}"
     if kind == "method" and groups.get("Method of"):
         first += f" of {_names(G, groups['Method of'], 1)}"
+    if kind in ("API route", "page") and d.get("route_framework"):
+        first += f" ({sanitize_label(str(d['route_framework']))})"
     if src:
         first += f" in {src}" + (f" (line {line})" if line and kind != "file" else "")
     sentences = [first + "."]
+    if d.get("route_mounted"):
+        sentences.append("Its router is mounted elsewhere, so the full URL carries a prefix graphify could not resolve.")
 
     if kind == "comment":
         targets = [nb for direction, rel, nb, _ in rels if direction == "out" and rel == "rationale_for"]
@@ -252,13 +267,34 @@ def summarize_node(
     if callers:
         sentences.append(f"It is called by {_names(G, callers)}.")
 
-    if kind in ("function", "method", "UI component"):
+    handlers = groups.get("Handled by", [])
+    if handlers:
+        sentences.append(f"The code that runs for it is {_names(G, handlers)}.")
+    serves = groups.get("Handles", [])
+    if serves:
+        sentences.append(f"It runs whenever {_names(G, serves)} is requested.")
+    requests = groups.get("Requests", [])
+    if requests:
+        sentences.append(f"It calls the backend: {_names(G, requests)}.")
+    requested_by = groups.get("Requested by", [])
+    if requested_by:
+        sentences.append(f"The frontend reaches it from {_names(G, requested_by)}.")
+    elif kind == "API route":
+        sentences.append("No scanned frontend code calls it (it may serve another app or an external client).")
+    links = groups.get("Navigates to", [])
+    if links:
+        sentences.append(f"It links to {_names(G, links)}.")
+    opened_from = groups.get("Navigated to from", [])
+    if opened_from:
+        sentences.append(f"It is opened from {_names(G, opened_from)}.")
+
+    if kind in ("function", "method", "UI component") and not serves:
         if calls and not callers:
             sentences.append(
                 "Nothing in the scanned code calls it directly, so it is probably an entry point "
                 "(route/event handler, exported API, CLI command), called dynamically, or unused."
             )
-        elif callers and not calls:
+        elif callers and not calls and not requests:
             sentences.append("It calls nothing else in the codebase: a self-contained building block.")
 
     dependents = {nb for direction, rel, nb, _ in rels if direction == "in" and rel in _DEPENDENT_RELATIONS}
@@ -489,6 +525,11 @@ def codebase_overview(G: nx.Graph, communities: dict[int, list[str]],
             called = any(direction == "in" and r in ("calls", "indirect_call") for direction, r, _, _ in rels)
             if calls and not called:
                 entries.append((calls, nid))
+    routes = sorted(
+        (nid for nid in G.nodes if G.nodes[nid].get("route_path")),
+        key=lambda n: (G.nodes[n].get("route_method") == "PAGE", str(G.nodes[n].get("route_path")),
+                       str(G.nodes[n].get("route_method"))),
+    )
     foundations.sort(key=lambda t: (-t[0], str(t[1])))
     entries.sort(key=lambda t: (-t[0], str(t[1])))
     areas = []
@@ -507,4 +548,11 @@ def codebase_overview(G: nx.Graph, communities: dict[int, list[str]],
         "foundations": [{"id": nid, "dependents": n} for n, nid in foundations[:top]],
         "entry_points": [{"id": nid, "calls": n} for n, nid in entries[:top]],
         "areas": areas,
+        # The app's surface: every API route and page, API routes first.
+        "routes": [
+            {"id": nid, "callers": sum(1 for direction, r, _, _ in index.get(nid, [])
+                                       if direction == "in" and r in ("requests", "navigates"))}
+            for nid in routes[:_OVERVIEW_ROUTES]
+        ],
+        "route_count": len(routes),
     }
