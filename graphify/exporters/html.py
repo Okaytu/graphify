@@ -9,6 +9,7 @@ from graphify.paths import write_text_atomic
 import json
 import networkx as nx
 from graphify.security import sanitize_label
+from graphify.tour import suggest_tours
 from graphify.explain import (
     RELATION_PHRASES,
     SnippetReader,
@@ -78,6 +79,16 @@ def _html_styles() -> str:
   .code-snippet { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px 6px 0; margin-top: 4px; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-x: auto; white-space: pre; color: var(--text); }
   .code-snippet .ln { display: inline-block; width: 3.4em; padding-right: 10px; text-align: right; color: var(--muted); user-select: none; }
   .overview-count { color: var(--count); font-size: 11px; }
+  .tour-link { border-left-color: #4E79A7; }
+  .tour-bar { border: 1px solid #4E79A7; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; background: var(--bg); }
+  .tour-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-2); }
+  .tour-title { font-weight: 600; color: var(--text); margin: 2px 0 4px; }
+  .tour-reason { color: var(--text); margin-bottom: 8px; }
+  .tour-nav { display: flex; gap: 6px; }
+  .tour-nav button { flex: 1; background: var(--panel); color: var(--text); border: 1px solid var(--input-border); border-radius: 4px; padding: 3px 0; font-size: 12px; cursor: pointer; }
+  .tour-nav button:hover:not([disabled]) { border-color: #4E79A7; }
+  .tour-nav button[disabled] { opacity: 0.4; cursor: default; }
+  .tour-nav button.primary { background: #4E79A7; border-color: #4E79A7; color: #fff; }
   #legend-wrap { flex: 1; overflow-y: auto; padding: 12px; }
   #legend-wrap h3 { font-size: 13px; color: var(--text-2); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
   .legend-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; border-radius: 4px; font-size: 12px; }
@@ -360,7 +371,62 @@ function showInfo(nodeId) {{
   }}
   if (ex && ex.code) html += codeBlock(ex.code, n.source_file || '');
   document.getElementById('info-content').innerHTML = html;
+  if (!renderingTourStep) tour = null;  // inspecting any other node leaves the tour
 }}
+
+// Guided tours (graphify/tour.py): a reading order from where execution starts,
+// each step saying why it comes next. Back/Next or the arrow keys walk it; the
+// graph focuses each step and highlights the edge that led there.
+let tour = null;               // {{ i: tour index, step: step index }}
+let renderingTourStep = false;
+const EDGE_BY_PAIR = new Map();
+RAW_EDGES.forEach((e, i) => {{
+  EDGE_BY_PAIR.set(e.from + '\\u0000' + e.to, i);
+  if (!EDGE_BY_PAIR.has(e.to + '\\u0000' + e.from)) EDGE_BY_PAIR.set(e.to + '\\u0000' + e.from, i);
+}});
+
+function showTourStep() {{
+  const t = OVERVIEW.tours[tour.i];
+  const s = t.steps[tour.step];
+  const eid = s.from ? EDGE_BY_PAIR.get(s.from + '\\u0000' + s.id) : undefined;
+  network.focus(s.id, {{ scale: 1.3, animation: true }});
+  network.setSelection({{ nodes: [s.id], edges: eid === undefined ? [] : [eid] }}, {{ unselectAll: true }});
+  renderingTourStep = true;
+  try {{ showInfo(s.id); }} finally {{ renderingTourStep = false; }}
+  const last = tour.step === t.steps.length - 1;
+  const bar = `<div class="tour-bar">
+    <div class="tour-head">Guided tour \u00b7 step ${{tour.step + 1}} of ${{t.steps.length}}</div>
+    <div class="tour-title">${{esc(t.title)}}</div>
+    <div class="tour-reason">${{esc(s.reason)}}</div>
+    <div class="tour-nav">
+      <button type="button" data-tour-nav="prev" ${{tour.step === 0 ? 'disabled' : ''}}>\u2190 Back</button>
+      <button type="button" class="primary" data-tour-nav="${{last ? 'exit' : 'next'}}">${{last ? 'Finish' : 'Next \u2192'}}</button>
+      <button type="button" data-tour-nav="exit">Exit</button>
+    </div></div>`;
+  document.getElementById('info-content').insertAdjacentHTML('afterbegin', bar);
+  document.getElementById('info-panel').scrollTop = 0;
+}}
+
+function tourGo(action) {{
+  if (!tour) return;
+  const n = OVERVIEW.tours[tour.i].steps.length;
+  if (action === 'next' && tour.step < n - 1) {{ tour.step += 1; showTourStep(); }}
+  else if (action === 'prev' && tour.step > 0) {{ tour.step -= 1; showTourStep(); }}
+  else if (action === 'exit') {{ tour = null; network.unselectAll(); showOverview(); }}
+}}
+
+document.addEventListener('click', e => {{
+  const start = e.target.closest && e.target.closest('[data-tour]');
+  if (start) {{ tour = {{ i: Number(start.dataset.tour), step: 0 }}; showTourStep(); return; }}
+  const nav = e.target.closest && e.target.closest('[data-tour-nav]');
+  if (nav && !nav.disabled) tourGo(nav.dataset.tourNav);
+}});
+document.addEventListener('keydown', e => {{
+  if (!tour || (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName))) return;
+  if (e.key === 'ArrowRight') tourGo('next');
+  else if (e.key === 'ArrowLeft') tourGo('prev');
+  else if (e.key === 'Escape') tourGo('exit');
+}});
 
 // The big picture before any node is picked: foundations (most depended-on
 // code), likely entry points and the main areas, each clickable.
@@ -373,6 +439,11 @@ function showOverview() {{
       return `<div class="section-title">${{esc(title)}}</div><div class="field" style="font-size:11px;color:var(--muted)">${{esc(hint)}}</div>`
         + items.map(fmt).join('');
     }};
+    if (OVERVIEW.tours && OVERVIEW.tours.length) {{
+      html += `<div class="section-title">Guided tours</div><div class="field" style="font-size:11px;color:var(--muted)">Step-by-step walks through the code, starting where execution starts. Use \u2190 \u2192 to move.</div>`;
+      html += OVERVIEW.tours.map((t, i) =>
+        `<span class="neighbor-link tour-link" data-tour="${{i}}">${{esc(t.title)}} <span class="overview-count">${{t.steps.length}} steps</span></span>`).join('');
+    }}
     const moreRoutes = (OVERVIEW.route_count || 0) - (OVERVIEW.routes || []).length;
     html += list('Routes & pages', 'What the app exposes: each API route and page, and how many places call or link to it.'
       + (moreRoutes > 0 ? ` Showing the first ${{(OVERVIEW.routes || []).length}} of ${{OVERVIEW.route_count}}; search for the rest.` : ''),
@@ -639,6 +710,11 @@ def _explain_payload(G: nx.Graph, communities: dict[int, list[str]],
                 budget -= sum(len(line) + 1 for line in code["lines"])
             payload[str(nid)] = entry
         ov = codebase_overview(G, communities, community_labels, index=index)
+        ov["tours"] = [
+            {"title": t["title"], "steps": [{"id": st["id"], "reason": st["reason"], "from": st["from"]}
+                                            for st in t["steps"]]}
+            for t in suggest_tours(G, index=index)
+        ]
         ov["kinds_text"] = ", ".join(
             f"{n} {k}{'' if n == 1 else ('es' if k.endswith('s') else 's')}"
             for k, n in ov.pop("kinds").items() if k != "comment"

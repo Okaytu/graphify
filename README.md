@@ -401,6 +401,32 @@ API routes (2):
 
 `graphify routes --json` gives the same map as data, and the MCP `list_routes` tool gives it to your assistant. Matching a call to a route (`/users/${id}` to `/users/:id`) is a deduction, so those links are `INFERRED`. A base URL held in a variable (`${API_URL}/users`), or a router mounted with a prefix graphify can't see, is matched by the end of the path.
 
+### Guided tours
+
+Not sure where to start reading? A guided tour gives you a reading order. It begins where execution begins (a page, an API route, or a function nothing else calls) and follows the flow outward, one request at a time: component → API call → route → handler → data layer. It ends with a couple of foundations: the code the most other code depends on. Every step says why it comes next, and each one carries the explanation and code described above.
+
+- **In `graph.html`**: pick a tour under **Guided tours** in the side panel, then use Back/Next or the ← → keys. The graph zooms to each step and highlights the edge that led there.
+- **On the CLI**: `graphify tour` walks the first suggested tour and lists the others. `graphify tour "loadUser"` starts from a node you choose; `--steps N`, `--list` and `--no-code` adjust it.
+- **For your assistant**: the MCP `get_tour` tool, for prompts like "walk me through how this app works".
+
+```text
+$ graphify tour "UserActionsMenu" --no-code    # step headers and reasons; each step also explains itself
+Tour: Follow UserActionsMenu() (UserActionsMenu.tsx) (10 steps)
+Step 1/10: UserActionsMenu()  [UI component · frontend/src/components/Admin/UserActionsMenu.tsx:19]
+  Why: Start here: nothing in the scanned code calls UserActionsMenu() directly, so this is where the flow begins. It leads to 54 other pieces of code.
+Step 2/10: EditUser()  [UI component · frontend/src/components/Admin/EditUser.tsx:59]
+  Why: UserActionsMenu() calls EditUser().
+Step 3/10: .updateUser()  [method · frontend/src/client/sdk.gen.ts:246]
+  Why: EditUser() calls .updateUser().
+Step 4/10: PATCH /users/{user_id}  [API route · backend/app/api/routes/users.py:183]
+  Why: .updateUser() sends a request to PATCH /users/{user_id}.
+Step 5/10: update_user()  [function · backend/app/api/routes/users.py:187]
+  Why: PATCH /users/{user_id} is served by update_user().
+...
+```
+
+Tests, generated code and third-party packages are skipped: they are not where you learn how an app works.
+
 `graph.html` embeds those source snippets (about 2 MB per page at most). Set `GRAPHIFY_HTML_CODE=0` before building to leave code out, for example when the file will be shared outside your team. `graphify explain "X" --no-code` does the same on the CLI, and MCP `get_node` takes `include_code: false`.
 
 ---

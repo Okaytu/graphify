@@ -2357,6 +2357,27 @@ def _build_server(graph_path: str):
                 },
             ),
             types.Tool(
+                name="get_tour",
+                description=(
+                    "Guided tour of the codebase: a reading order that starts where execution "
+                    "starts (a page, an API route, or an uncalled function) and follows calls, "
+                    "requests and route handlers outward, each step saying why it comes next, "
+                    "with a plain-language explanation. Use it to answer 'walk me through how "
+                    "this app works' or 'explain the flow from X'. Without `start`, returns the "
+                    "first suggested tour and lists the others."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "start": {"type": "string", "description": "Optional node label or id to start from"},
+                        "steps": {"type": "integer", "default": 10, "description": "Max steps (1-25)"},
+                        "include_code": {"type": "boolean", "default": False,
+                                         "description": "Include a short code excerpt per step"},
+                        "token_budget": {"type": "integer", "default": 3000, "description": "Max output tokens"},
+                    },
+                },
+            ),
+            types.Tool(
                 name="get_neighbors",
                 description="Get all direct neighbors of a node with edge details.",
                 inputSchema={
@@ -2566,6 +2587,28 @@ def _build_server(graph_path: str):
             format_routes(G), budget, "Raise token_budget or use get_node on a specific route"
         )
 
+    def _tool_get_tour(arguments: dict) -> str:
+        from graphify.explain import SnippetReader
+        from graphify.tour import build_tour, format_tour, suggest_tours
+        steps = max(1, min(25, int(arguments.get("steps", 10))))
+        start = str(arguments.get("start") or "").strip()
+        if start:
+            nid, err = _resolve_single_node(G, start.lower())
+            if err:
+                return err
+            tours = [build_tour(G, nid, max_steps=steps)]
+        else:
+            tours = suggest_tours(G, max_steps=steps)
+        if not tours:
+            return "No code to tour in this graph."
+        reader = SnippetReader(active_graph_path) if arguments.get("include_code") is True else None
+        lines = format_tour(G, tours[0], reader=reader)
+        if len(tours) > 1:
+            lines += ["", "Other suggested tours (call get_tour with start=...):"]
+            lines += [f"  {t['title']}: start={G.nodes[t['start']].get('label', t['start'])!r}" for t in tours[1:]]
+        budget = int(arguments.get("token_budget", 3000))
+        return _cut_lines_to_budget(lines, budget, "Lower steps, or start the tour from a specific node")
+
     def _tool_get_neighbors(arguments: dict) -> str:
         raw = _node_arg(arguments)
         if not raw:
@@ -2739,6 +2782,7 @@ def _build_server(graph_path: str):
         "query_graph": _tool_query_graph,
         "get_node": _tool_get_node,
         "list_routes": _tool_list_routes,
+        "get_tour": _tool_get_tour,
         "get_neighbors": _tool_get_neighbors,
         "get_community": _tool_get_community,
         "god_nodes": _tool_god_nodes,

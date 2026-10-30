@@ -227,7 +227,7 @@ def summarize_node(
     src = sanitize_label(str(d.get("source_file") or ""))
     line = _line_of(d.get("source_location"))
 
-    article = "an" if kind[:1].lower() in "aeiou" else "a"
+    article = "an" if kind[:1].lower() in "aeiou" and not kind.startswith("UI") else "a"
     first = f"{label} is {article} {kind}"
     if kind == "method" and groups.get("Method of"):
         first += f" of {_names(G, groups['Method of'], 1)}"
